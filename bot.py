@@ -17,6 +17,12 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8922158442:AAHXph_Zs2_3PxgKIP5N9PLhg1y_981ojOs")
 ADMIN_IDS_FILE = "admin_ids.json"
 MATERIALS_FILE = "materials.json"
+USERS_FILE = "users.json"
+
+NARX = 10000
+KARTA = "KARTA_RAQAMINI_BU_YERGA_YOZING"  # nano da o'zgartiring
+ADMIN_USERNAME = "@nozimjonov20"
+BEPUL_RAQAM = "1"  # Bu raqamdagi material bepul
 
 # ===================== MA'LUMOT YUKLASH =====================
 def load_json(filename, default):
@@ -35,70 +41,212 @@ def get_admins():
 def get_materials():
     return load_json(MATERIALS_FILE, {})
 
+def get_users():
+    return load_json(USERS_FILE, {})
+
 def is_admin(user_id: int) -> bool:
     return user_id in get_admins()
+
+def is_paid(user_id: int) -> bool:
+    users = get_users()
+    return users.get(str(user_id), {}).get("paid", False)
+
+def set_paid(user_id: int, name: str):
+    users = get_users()
+    users[str(user_id)] = {"name": name, "paid": True}
+    save_json(USERS_FILE, users)
+
+def register_user(user_id: int, name: str):
+    users = get_users()
+    if str(user_id) not in users:
+        users[str(user_id)] = {"name": name, "paid": False}
+        save_json(USERS_FILE, users)
 
 # ===================== FOYDALANUVCHI KOMANDALAR =====================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    admins = get_admins()
     materials = get_materials()
-    
-    text = (
-        f"👋 Salom, {user.first_name}!\n\n"
-        "📚 *YaxshiliksarI Bot*ga xush kelibsiz!\n\n"
-        "Bu botda kitoblar, slaydlar va konspektlar mavjud.\n\n"
-        "📥 Material olish uchun uning *raqamini* yuboring.\n"
-        f"📦 Jami materiallar soni: *{len(materials)}* ta\n\n"
-        "📋 Barcha materiallar ro'yxati uchun /list buyrug'ini yuboring."
-    )
-    
-    if not admins:
-        text += "\n\n⚙️ /addme — Admin bo'lish (birinchi foydalanuvchi)"
-    
-    await update.message.reply_text(text, parse_mode="Markdown")
+    register_user(user.id, user.full_name)
+
+    if is_admin(user.id):
+        await update.message.reply_text(
+            f"👋 Salom, {user.first_name}!\n\n"
+            "🔧 Siz admin sifatida kirgansiz.\n"
+            "/admin — Admin panel"
+        )
+        return
+
+    paid = is_paid(user.id)
+    free_mat = materials.get(BEPUL_RAQAM)
+
+    if paid:
+        text = (
+            f"👋 Salom, {user.first_name}!\n\n"
+            "📖 *Dinshunoslik fani materiallari botiga xush kelibsiz!*\n\n"
+            "✅ Sizning obunangiz faol.\n\n"
+            f"📦 Jami materiallar: *{len(materials)}* ta\n\n"
+            "📋 /list — Materiallar ro'yxati\n"
+            "💡 Material raqamini yuboring va yuklab oling!"
+        )
+        await update.message.reply_text(text, parse_mode="Markdown")
+    else:
+        keyboard = [
+            [InlineKeyboardButton("🎁 Bepul namuna ko'rish", callback_data="bepul_namuna")],
+            [InlineKeyboardButton("💳 Payme orqali to'lash", callback_data="tolov_payme")],
+            [InlineKeyboardButton("💳 Click orqali to'lash", callback_data="tolov_click")],
+            [InlineKeyboardButton("📞 Admin bilan bog'lanish", url=f"https://t.me/nozimjonov20")],
+        ]
+        text = (
+            f"👋 Salom, {user.first_name}!\n\n"
+            "📖 *Dinshunoslik fani materiallari botiga xush kelibsiz!*\n\n"
+            "Bu botda:\n"
+            "📑 Slaydlar\n"
+            "📚 Konspektlar\n"
+            "📝 Testlar va qo'shimcha materiallar\n\n"
+            "🎁 *1-material bepul!* Sinab ko'ring.\n\n"
+            f"💰 To'liq obuna narxi: *{NARX:,} so'm*\n\n"
+            "⬇️ Quyidagi tugmani bosing:"
+        )
+        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user = query.from_user
+    materials = get_materials()
+
+    if query.data == "bepul_namuna":
+        mat = materials.get(BEPUL_RAQAM)
+        if mat:
+            await query.message.reply_text(f"⏳ *{mat.get('title')}* yuklanmoqda...", parse_mode="Markdown")
+            try:
+                file_id = mat.get("file_id")
+                file_type = mat.get("type", "document")
+                caption = (
+                    f"🎁 *BEPUL NAMUNA*\n\n"
+                    f"📚 *{mat.get('title')}*\n\n"
+                    f"{mat.get('description', '')}\n\n"
+                    f"✅ To'liq obuna uchun: /start"
+                )
+                if file_type == "photo":
+                    await query.message.reply_photo(photo=file_id, caption=caption, parse_mode="Markdown")
+                elif file_type == "video":
+                    await query.message.reply_video(video=file_id, caption=caption, parse_mode="Markdown")
+                else:
+                    await query.message.reply_document(document=file_id, caption=caption, parse_mode="Markdown")
+            except Exception as e:
+                logger.error(e)
+                await query.message.reply_text("❌ Hozircha bepul material yuklanmagan. Tez orada qo'shiladi!")
+        else:
+            await query.message.reply_text("📭 Hozircha bepul material yuklanmagan. Tez orada qo'shiladi!")
+
+    elif query.data == "tolov_payme":
+        text = (
+            "💳 *Payme orqali to'lash:*\n\n"
+            f"💰 Summa: *{NARX:,} so'm*\n\n"
+            "📱 Quyidagi karta raqamiga o'tkazma qiling:\n"
+            f"`{KARTA}`\n\n"
+            f"✅ To'lovdan so'ng chekni adminga yuboring:\n"
+            f"👤 {ADMIN_USERNAME}\n\n"
+            "⏳ Admin tasdiqlashidan so'ng obunangiz faollashadi."
+        )
+        keyboard = [
+            [InlineKeyboardButton("✅ Chekni adminga yuborish", url=f"https://t.me/nozimjonov20")],
+            [InlineKeyboardButton("◀️ Orqaga", callback_data="orqaga")],
+        ]
+        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+
+    elif query.data == "tolov_click":
+        text = (
+            "💳 *Click orqali to'lash:*\n\n"
+            f"💰 Summa: *{NARX:,} so'm*\n\n"
+            "📱 Quyidagi karta raqamiga o'tkazma qiling:\n"
+            f"`{KARTA}`\n\n"
+            f"✅ To'lovdan so'ng chekni adminga yuboring:\n"
+            f"👤 {ADMIN_USERNAME}\n\n"
+            "⏳ Admin tasdiqlashidan so'ng obunangiz faollashadi."
+        )
+        keyboard = [
+            [InlineKeyboardButton("✅ Chekni adminga yuborish", url=f"https://t.me/nozimjonov20")],
+            [InlineKeyboardButton("◀️ Orqaga", callback_data="orqaga")],
+        ]
+        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+
+    elif query.data == "orqaga":
+        keyboard = [
+            [InlineKeyboardButton("🎁 Bepul namuna ko'rish", callback_data="bepul_namuna")],
+            [InlineKeyboardButton("💳 Payme orqali to'lash", callback_data="tolov_payme")],
+            [InlineKeyboardButton("💳 Click orqali to'lash", callback_data="tolov_click")],
+            [InlineKeyboardButton("📞 Admin bilan bog'lanish", url=f"https://t.me/nozimjonov20")],
+        ]
+        text = (
+            "📖 *Dinshunoslik fani materiallari botiga xush kelibsiz!*\n\n"
+            "🎁 *1-material bepul!* Sinab ko'ring.\n\n"
+            f"💰 To'liq obuna narxi: *{NARX:,} so'm*\n\n"
+            "⬇️ Quyidagi tugmani bosing:"
+        )
+        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
 
 async def list_materials(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    materials = get_materials()
-    
-    if not materials:
-        await update.message.reply_text("📭 Hozircha materiallar yo'q.\nAdmin tez orada yuklaydi!")
+    user = update.effective_user
+    if not is_admin(user.id) and not is_paid(user.id):
+        await update.message.reply_text(
+            "❌ Bu bo'lim faqat obuna bo'lganlar uchun.\n\n"
+            "/start — To'lov qilish"
+        )
         return
-    
+
+    materials = get_materials()
+    if not materials:
+        await update.message.reply_text("📭 Hozircha materiallar yo'q.")
+        return
+
     text = "📚 *Mavjud materiallar:*\n\n"
     for num, mat in sorted(materials.items(), key=lambda x: int(x[0])):
         icon = "📄" if mat.get("type") == "document" else "🖼"
-        text += f"{icon} *{num}* — {mat.get('title', 'Nomsiz')}\n"
-    
+        tag = "🎁 " if num == BEPUL_RAQAM else ""
+        text += f"{tag}{icon} *{num}* — {mat.get('title', 'Nomsiz')}\n"
+
     text += "\n💡 Raqamini yozing va material yuklab beriladi!"
     await update.message.reply_text(text, parse_mode="Markdown")
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
     text = update.message.text.strip()
     materials = get_materials()
-    
-    # Raqam yuborilganmi?
+    register_user(user.id, user.full_name)
+
     if text.isdigit():
+        # Bepul material — hamma yuklay oladi
+        if text == BEPUL_RAQAM:
+            mat = materials.get(text)
+            if mat:
+                await send_material(update.message, mat, bepul=True)
+            else:
+                await update.message.reply_text("📭 Bepul material hali yuklanmagan.")
+            return
+
+        # Pullik materiallar
+        if not is_admin(user.id) and not is_paid(user.id):
+            keyboard = [
+                [InlineKeyboardButton("💳 Obuna bo'lish", callback_data="orqaga")]
+            ]
+            await update.message.reply_text(
+                "🔒 Bu material faqat obuna bo'lganlar uchun.\n\n"
+                "🎁 *1-material bepul* — sinab ko'ring!\n\n"
+                "/start — Obuna bo'lish",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return
+
         mat = materials.get(text)
         if mat:
-            await update.message.reply_text(f"⏳ *{mat.get('title')}* yuklanmoqda...", parse_mode="Markdown")
-            try:
-                file_id = mat.get("file_id")
-                file_type = mat.get("type", "document")
-                caption = f"📚 *{mat.get('title')}*\n\n{mat.get('description', '')}"
-                
-                if file_type == "photo":
-                    await update.message.reply_photo(photo=file_id, caption=caption, parse_mode="Markdown")
-                elif file_type == "video":
-                    await update.message.reply_video(video=file_id, caption=caption, parse_mode="Markdown")
-                else:
-                    await update.message.reply_document(document=file_id, caption=caption, parse_mode="Markdown")
-            except Exception as e:
-                logger.error(f"Fayl yuborishda xato: {e}")
-                await update.message.reply_text("❌ Faylni yuborishda xato. Admin bilan bog'laning.")
+            await send_material(update.message, mat)
         else:
             await update.message.reply_text(
                 f"❓ *{text}* raqamli material topilmadi.\n\n"
@@ -108,130 +256,186 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(
             "💡 Material olish uchun faqat *raqam* yuboring.\n"
-            "Masalan: `1` yoki `15`\n\n"
-            "📋 /list — barcha materiallar ro'yxati",
+            "Masalan: `1` yoki `5`\n\n"
+            "📋 /list — materiallar ro'yxati",
             parse_mode="Markdown"
         )
+
+
+async def send_material(message, mat, bepul=False):
+    title = mat.get('title')
+    await message.reply_text(f"⏳ *{title}* yuklanmoqda...", parse_mode="Markdown")
+    try:
+        file_id = mat.get("file_id")
+        file_type = mat.get("type", "document")
+        if bepul:
+            caption = f"🎁 *BEPUL NAMUNA*\n📚 *{title}*\n\n{mat.get('description', '')}\n\n✅ To'liq obuna: /start"
+        else:
+            caption = f"📚 *{title}*\n\n{mat.get('description', '')}"
+
+        if file_type == "photo":
+            await message.reply_photo(photo=file_id, caption=caption, parse_mode="Markdown")
+        elif file_type == "video":
+            await message.reply_video(video=file_id, caption=caption, parse_mode="Markdown")
+        else:
+            await message.reply_document(document=file_id, caption=caption, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Fayl yuborishda xato: {e}")
+        await message.reply_text("❌ Faylni yuborishda xato. Admin bilan bog'laning.")
 
 
 # ===================== ADMIN KOMANDALAR =====================
 
 async def add_me_as_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Birinchi admin qo'shilish"""
     admins = get_admins()
     user_id = update.effective_user.id
-    
-    if admins and not is_admin(user_id):
-        await update.message.reply_text("❌ Siz admin emassiz.")
-        return
-    
-    if user_id not in admins:
-        admins.append(user_id)
-        save_json(ADMIN_IDS_FILE, admins)
-        await update.message.reply_text(
-            f"✅ Admin bo'ldingiz!\nSizning ID: `{user_id}`\n\n"
-            "🔧 Admin buyruqlari:\n"
-            "/upload — Material yuklash\n"
-            "/delete [raqam] — Material o'chirish\n"
-            "/stats — Statistika",
-            parse_mode="Markdown"
-        )
-    else:
+
+    if user_id in admins:
         await update.message.reply_text(f"✅ Siz allaqachon adminsiz. ID: `{user_id}`", parse_mode="Markdown")
+        return
+
+    if len(admins) >= 5:
+        await update.message.reply_text("❌ Adminlar soni to'ldi (max 5 ta).")
+        return
+
+    admins.append(user_id)
+    save_json(ADMIN_IDS_FILE, admins)
+    await update.message.reply_text(
+        f"✅ Admin bo'ldingiz!\nID: `{user_id}`\n\n"
+        "/admin — Admin panel",
+        parse_mode="Markdown"
+    )
 
 
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         await update.message.reply_text("❌ Ruxsat yo'q.")
         return
-    
+
     materials = get_materials()
-    admins = get_admins()
-    
+    users = get_users()
+    paid_count = sum(1 for u in users.values() if u.get("paid"))
+
     text = (
         "🔧 *Admin Panel*\n\n"
-        f"👥 Adminlar soni: {len(admins)}\n"
-        f"📦 Materiallar soni: {len(materials)}\n\n"
-        "📤 *Material yuklash:*\n"
-        "Faylni bot ga yuboring + caption (sarlavha):\n"
-        "`/upload [raqam] | [sarlavha] | [tavsif]`\n\n"
-        "Avval faylni yuboring, keyin:\n"
-        "`/save [raqam] | [sarlavha]`\n\n"
-        "🗑 *O'chirish:*\n"
-        "`/delete [raqam]`\n\n"
-        "📋 *Ro'yxat:* /list\n"
-        "📊 *Statistika:* /stats"
+        f"📦 Materiallar: {len(materials)}\n"
+        f"👥 Jami foydalanuvchilar: {len(users)}\n"
+        f"✅ To'lagan: {paid_count}\n"
+        f"💰 Narx: {NARX:,} so'm\n\n"
+        "📤 *Fayl yuklash:*\n"
+        "Faylni yuboring + caption:\n"
+        "`/save [raqam] | [sarlavha] | [tavsif]`\n\n"
+        "✅ *Obuna faollashtirish:*\n"
+        "`/faollashtir [user_id]`\n\n"
+        "💰 *Narx o'zgartirish:*\n"
+        "`/narx [summa]`\n\n"
+        "🗑 `/delete [raqam]`\n"
+        "📊 /stats — Statistika\n"
+        "👥 /foydalanuvchilar — Ro'yxat"
     )
     await update.message.reply_text(text, parse_mode="Markdown")
 
 
+async def faollashtir(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("❌ Ruxsat yo'q.")
+        return
+
+    if not context.args:
+        await update.message.reply_text("❌ User ID kiriting: `/faollashtir 123456789`", parse_mode="Markdown")
+        return
+
+    user_id = context.args[0]
+    set_paid(int(user_id), "Admin tomonidan")
+    await update.message.reply_text(f"✅ {user_id} obunasi faollashtirildi!")
+
+    try:
+        await context.bot.send_message(
+            chat_id=int(user_id),
+            text="🎉 *Tabriklaymiz!*\n\nObunangiz faollashtirildi!\n\n"
+                 "📚 Barcha materiallarga kirish imkoningiz bor.\n"
+                 "/list — Materiallar ro'yxati",
+            parse_mode="Markdown"
+        )
+    except:
+        pass
+
+
+async def narx_ozgartir(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("❌ Ruxsat yo'q.")
+        return
+
+    if not context.args:
+        await update.message.reply_text("❌ Narx kiriting: `/narx 15000`", parse_mode="Markdown")
+        return
+
+    global NARX
+    try:
+        NARX = int(context.args[0])
+        await update.message.reply_text(f"✅ Narx: *{NARX:,} so'm*", parse_mode="Markdown")
+    except:
+        await update.message.reply_text("❌ To'g'ri son kiriting!")
+
+
+async def foydalanuvchilar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("❌ Ruxsat yo'q.")
+        return
+
+    users = get_users()
+    if not users:
+        await update.message.reply_text("📭 Hali foydalanuvchilar yo'q.")
+        return
+
+    text = "👥 *Foydalanuvchilar:*\n\n"
+    for uid, info in users.items():
+        status = "✅" if info.get("paid") else "❌"
+        text += f"{status} `{uid}` — {info.get('name', 'Nomsiz')}\n"
+
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+
 async def handle_admin_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin fayl yuborganda saqlash"""
     if not is_admin(update.effective_user.id):
         return
-    
+
     message = update.message
-    caption = message.caption or ""
-    
-    # Caption formatini tekshirish: /save raqam | sarlavha | tavsif
-    if not caption.startswith("/save"):
+    caption = (message.caption or "").strip()
+
+    # Caption da faqat raqam yoziladi: masalan "1" yoki "5"
+    if not caption or not caption.split()[0].isdigit():
         await message.reply_text(
-            "📌 Faylni saqlash uchun caption qo'shing:\n"
-            "`/save [raqam] | [sarlavha] | [tavsif]`\n\n"
-            "Misol: `/save 1 | Python kitob | Boshlang'ich Python darsligi`",
+            "📌 Faylni yuborayotganda caption ga faqat *raqam* yozing!\n\n"
+            "Misol: `1` yoki `5`\n\n"
+            "Ixtiyoriy sarlavha qo'shmoqchi bo'lsangiz:\n"
+            "`1 | Sarlavha | Tavsif`",
             parse_mode="Markdown"
         )
         return
-    
-    await save_file_from_message(message, caption)
 
-
-async def save_file_from_message(message, caption):
-    parts = caption.replace("/save", "").strip().split("|")
-    if len(parts) < 2:
-        await message.reply_text(
-            "❌ Format xato!\n"
-            "`/save [raqam] | [sarlavha] | [tavsif (ixtiyoriy)]`",
-            parse_mode="Markdown"
-        )
-        return
-    
+    parts = caption.split("|")
     num = parts[0].strip()
-    title = parts[1].strip()
+    title = parts[1].strip() if len(parts) > 1 else f"Material {num}"
     description = parts[2].strip() if len(parts) > 2 else ""
-    
-    if not num.isdigit():
-        await message.reply_text("❌ Raqam to'g'ri emas!")
-        return
-    
-    # Fayl turini aniqlash
+
     if message.document:
-        file_id = message.document.file_id
-        file_type = "document"
+        file_id, file_type = message.document.file_id, "document"
     elif message.photo:
-        file_id = message.photo[-1].file_id
-        file_type = "photo"
+        file_id, file_type = message.photo[-1].file_id, "photo"
     elif message.video:
-        file_id = message.video.file_id
-        file_type = "video"
+        file_id, file_type = message.video.file_id, "video"
     else:
         await message.reply_text("❌ Fayl turi qo'llab-quvvatlanmaydi!")
         return
-    
+
     materials = get_materials()
-    materials[num] = {
-        "title": title,
-        "description": description,
-        "file_id": file_id,
-        "type": file_type
-    }
+    materials[num] = {"title": title, "description": description, "file_id": file_id, "type": file_type}
     save_json(MATERIALS_FILE, materials)
-    
+
+    tag = " 🎁 (BEPUL)" if num == BEPUL_RAQAM else ""
     await message.reply_text(
-        f"✅ Material saqlandi!\n\n"
-        f"🔢 Raqam: *{num}*\n"
-        f"📌 Sarlavha: *{title}*\n"
-        f"📁 Turi: {file_type}",
+        f"✅ Saqlandi!\n*{num}* — {title}{tag}",
         parse_mode="Markdown"
     )
 
@@ -240,71 +444,64 @@ async def delete_material(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         await update.message.reply_text("❌ Ruxsat yo'q.")
         return
-    
+
     if not context.args:
-        await update.message.reply_text("❌ Raqam kiriting: `/delete 5`", parse_mode="Markdown")
+        await update.message.reply_text("❌ `/delete 5`", parse_mode="Markdown")
         return
-    
+
     num = context.args[0]
     materials = get_materials()
-    
+
     if num in materials:
         title = materials[num].get("title", "Nomsiz")
         del materials[num]
         save_json(MATERIALS_FILE, materials)
         await update.message.reply_text(f"🗑 *{num}* — {title} o'chirildi.", parse_mode="Markdown")
     else:
-        await update.message.reply_text(f"❌ {num} raqamli material topilmadi.")
+        await update.message.reply_text(f"❌ {num} topilmadi.")
 
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         await update.message.reply_text("❌ Ruxsat yo'q.")
         return
-    
+
     materials = get_materials()
-    admins = get_admins()
-    
-    doc_count = sum(1 for m in materials.values() if m.get("type") == "document")
-    photo_count = sum(1 for m in materials.values() if m.get("type") == "photo")
-    video_count = sum(1 for m in materials.values() if m.get("type") == "video")
-    
-    text = (
+    users = get_users()
+    paid_count = sum(1 for u in users.values() if u.get("paid"))
+
+    await update.message.reply_text(
         "📊 *Statistika*\n\n"
-        f"📦 Jami materiallar: *{len(materials)}*\n"
-        f"  📄 Hujjatlar: {doc_count}\n"
-        f"  🖼 Rasmlar: {photo_count}\n"
-        f"  🎥 Videolar: {video_count}\n\n"
-        f"👥 Adminlar: {len(admins)}\n"
-        f"🆔 Admin IDlar: {', '.join(str(a) for a in admins)}"
+        f"📦 Materiallar: *{len(materials)}*\n"
+        f"👥 Foydalanuvchilar: *{len(users)}*\n"
+        f"✅ To'laganlar: *{paid_count}*\n"
+        f"💰 Narx: *{NARX:,} so'm*",
+        parse_mode="Markdown"
     )
-    await update.message.reply_text(text, parse_mode="Markdown")
 
 
 # ===================== MAIN =====================
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
-    
-    # Foydalanuvchi komandalar
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("list", list_materials))
-    
-    # Admin komandalar
     app.add_handler(CommandHandler("addme", add_me_as_admin))
     app.add_handler(CommandHandler("admin", admin_panel))
     app.add_handler(CommandHandler("delete", delete_material))
     app.add_handler(CommandHandler("stats", stats))
-    
-    # Fayl yuklash (admin)
+    app.add_handler(CommandHandler("faollashtir", faollashtir))
+    app.add_handler(CommandHandler("narx", narx_ozgartir))
+    app.add_handler(CommandHandler("foydalanuvchilar", foydalanuvchilar))
+    app.add_handler(CallbackQueryHandler(button_handler))
+
     app.add_handler(MessageHandler(
         filters.Document.ALL | filters.PHOTO | filters.VIDEO,
         handle_admin_file
     ))
-    
-    # Matn xabarlari (raqam)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    
+
     logger.info("✅ Bot ishga tushdi!")
     app.run_polling(drop_pending_updates=True)
 
