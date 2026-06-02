@@ -511,4 +511,46 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     materials = get_materials()
     users = get_users()
-    paid_count = sum(1 for u in
+    paid_count = sum(1 for u in users.values() if u.get("paid"))
+
+    text = (
+        "📊 *Bot statistikasi:*\n\n"
+        f"👥 Jami a'zolar: {len(users)} ta\n"
+        f"💰 Obunani sotib olganlar: {paid_count} ta\n"
+        f"📦 Yuklangan materiallar: {len(materials)} ta"
+    )
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+# ===================== MAIN (ISHGA TUSHIRISH) =====================
+
+def main():
+    if not BOT_TOKEN:
+        print("XATO: BOT_TOKEN topilmadi! Environment variable'ni tekshiring.")
+        return
+
+    app = Application.builder().token(BOT_TOKEN).build()
+
+    # Handlers
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("list", list_materials))
+    app.add_handler(CommandHandler("admin", admin_panel))
+    app.add_handler(CommandHandler("faollashtir", faollashtir))
+    app.add_handler(CommandHandler("narx", narx_ozgartir))
+    app.add_handler(CommandHandler("foydalanuvchilar", foydalanuvchilar))
+    app.add_handler(CommandHandler("delete", delete_material))
+    app.add_handler(CommandHandler("stats", stats))
+    app.add_handler(CommandHandler("iamadmin", add_me_as_admin)) # Botda birinchi marta admin bo'lish uchun
+
+    app.add_handler(CallbackQueryHandler(button_handler))
+    
+    # Admin fayl yuborishi uchun filter
+    app.add_handler(MessageHandler(filters.Document.ALL | filters.PHOTO | filters.VIDEO, handle_admin_file))
+    
+    # Foydalanuvchilar xabarlari uchun filter
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    print("Bot muvaffaqiyatli ishga tushdi...")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
