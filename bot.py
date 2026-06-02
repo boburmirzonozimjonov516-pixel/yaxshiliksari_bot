@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
@@ -14,13 +15,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ===================== SOZLAMALAR =====================
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8922158442:AAHXph_Zs2_3PxgKIP5N9PLhg1y_981ojOs")
+BOT_TOKEN = os.environ.get("BOT_TOKEN")  # Tokenni environment variable orqali bering!
 ADMIN_IDS_FILE = "admin_ids.json"
 MATERIALS_FILE = "materials.json"
 USERS_FILE = "users.json"
 
 NARX = 10000
-KARTA = "KARTA_RAQAMINI_BU_YERGA_YOZING"  # nano da o'zgartiring
+KARTA = "KARTA_RAQAMINI_BU_YERGA_YOZING"  # O'z karta raqamingizni yozing
 ADMIN_USERNAME = "@nozimjonov20"
 BEPUL_RAQAM = "1"  # Bu raqamdagi material bepul
 
@@ -53,13 +54,21 @@ def is_paid(user_id: int) -> bool:
 
 def set_paid(user_id: int, name: str):
     users = get_users()
-    users[str(user_id)] = {"name": name, "paid": True}
+    if str(user_id) not in users:
+        users[str(user_id)] = {"name": name, "username": "", "qoshilgan": ""}
+    users[str(user_id)]["paid"] = True
+    users[str(user_id)]["tolagan_vaqt"] = datetime.now().strftime("%Y-%m-%d %H:%M")
     save_json(USERS_FILE, users)
 
-def register_user(user_id: int, name: str):
+def register_user(user_id: int, name: str, username: str = ""):
     users = get_users()
     if str(user_id) not in users:
-        users[str(user_id)] = {"name": name, "paid": False}
+        users[str(user_id)] = {
+            "name": name,
+            "username": username,
+            "paid": False,
+            "qoshilgan": datetime.now().strftime("%Y-%m-%d %H:%M")
+        }
         save_json(USERS_FILE, users)
 
 # ===================== FOYDALANUVCHI KOMANDALAR =====================
@@ -67,7 +76,7 @@ def register_user(user_id: int, name: str):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     materials = get_materials()
-    register_user(user.id, user.full_name)
+    register_user(user.id, user.full_name, user.username or "")
 
     if is_admin(user.id):
         await update.message.reply_text(
@@ -78,7 +87,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     paid = is_paid(user.id)
-    free_mat = materials.get(BEPUL_RAQAM)
 
     if paid:
         text = (
@@ -95,7 +103,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🎁 Bepul namuna ko'rish", callback_data="bepul_namuna")],
             [InlineKeyboardButton("💳 Payme orqali to'lash", callback_data="tolov_payme")],
             [InlineKeyboardButton("💳 Click orqali to'lash", callback_data="tolov_click")],
-            [InlineKeyboardButton("📞 Admin bilan bog'lanish", url=f"https://t.me/nozimjonov20")],
+            [InlineKeyboardButton("📞 Admin bilan bog'lanish", url="https://t.me/nozimjonov20")],
         ]
         text = (
             f"👋 Salom, {user.first_name}!\n\n"
@@ -114,7 +122,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    user = query.from_user
     materials = get_materials()
 
     if query.data == "bepul_namuna":
@@ -153,7 +160,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "⏳ Admin tasdiqlashidan so'ng obunangiz faollashadi."
         )
         keyboard = [
-            [InlineKeyboardButton("✅ Chekni adminga yuborish", url=f"https://t.me/nozimjonov20")],
+            [InlineKeyboardButton("✅ Chekni adminga yuborish", url="https://t.me/nozimjonov20")],
             [InlineKeyboardButton("◀️ Orqaga", callback_data="orqaga")],
         ]
         await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -169,7 +176,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "⏳ Admin tasdiqlashidan so'ng obunangiz faollashadi."
         )
         keyboard = [
-            [InlineKeyboardButton("✅ Chekni adminga yuborish", url=f"https://t.me/nozimjonov20")],
+            [InlineKeyboardButton("✅ Chekni adminga yuborish", url="https://t.me/nozimjonov20")],
             [InlineKeyboardButton("◀️ Orqaga", callback_data="orqaga")],
         ]
         await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -179,7 +186,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🎁 Bepul namuna ko'rish", callback_data="bepul_namuna")],
             [InlineKeyboardButton("💳 Payme orqali to'lash", callback_data="tolov_payme")],
             [InlineKeyboardButton("💳 Click orqali to'lash", callback_data="tolov_click")],
-            [InlineKeyboardButton("📞 Admin bilan bog'lanish", url=f"https://t.me/nozimjonov20")],
+            [InlineKeyboardButton("📞 Admin bilan bog'lanish", url="https://t.me/nozimjonov20")],
         ]
         text = (
             "📖 *Dinshunoslik fani materiallari botiga xush kelibsiz!*\n\n"
@@ -218,7 +225,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     text = update.message.text.strip()
     materials = get_materials()
-    register_user(user.id, user.full_name)
+    register_user(user.id, user.full_name, user.username or "")
 
     if text.isdigit():
         # Bepul material — hamma yuklay oladi
@@ -323,8 +330,9 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"✅ To'lagan: {paid_count}\n"
         f"💰 Narx: {NARX:,} so'm\n\n"
         "📤 *Fayl yuklash:*\n"
-        "Faylni yuboring + caption:\n"
-        "`/save [raqam] | [sarlavha] | [tavsif]`\n\n"
+        "Faylni yuboring va izohga (caption) yozing:\n"
+        "`1/Mavzu nomi`\n\n"
+        "Misol: `1/Islom dini tarixi`\n\n"
         "✅ *Obuna faollashtirish:*\n"
         "`/faollashtir [user_id]`\n\n"
         "💰 *Narx o'zgartirish:*\n"
@@ -357,7 +365,7 @@ async def faollashtir(update: Update, context: ContextTypes.DEFAULT_TYPE):
                  "/list — Materiallar ro'yxati",
             parse_mode="Markdown"
         )
-    except:
+    except Exception:
         pass
 
 
@@ -374,7 +382,7 @@ async def narx_ozgartir(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         NARX = int(context.args[0])
         await update.message.reply_text(f"✅ Narx: *{NARX:,} so'm*", parse_mode="Markdown")
-    except:
+    except Exception:
         await update.message.reply_text("❌ To'g'ri son kiriting!")
 
 
@@ -388,10 +396,32 @@ async def foydalanuvchilar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📭 Hali foydalanuvchilar yo'q.")
         return
 
-    text = "👥 *Foydalanuvchilar:*\n\n"
-    for uid, info in users.items():
-        status = "✅" if info.get("paid") else "❌"
-        text += f"{status} `{uid}` — {info.get('name', 'Nomsiz')}\n"
+    paid_users = {k: v for k, v in users.items() if v.get("paid")}
+    free_users = {k: v for k, v in users.items() if not v.get("paid")}
+
+    text = "✅ *SOTIB OLGANLAR:*\n\n"
+    if paid_users:
+        for uid, info in paid_users.items():
+            uname = f"@{info['username']}" if info.get("username") else "username yo'q"
+            vaqt = info.get("tolagan_vaqt", "")
+            text += f"💰 {info.get('name', 'Nomsiz')} ({uname})\n"
+            text += f"   🆔 `{uid}`\n"
+            if vaqt:
+                text += f"   📅 {vaqt}\n"
+            text += "\n"
+    else:
+        text += "Hali hech kim sotib olmagan.\n\n"
+
+    text += f"\n❌ *SOTIB OLMAGANLAR:* {len(free_users)} ta\n\n"
+    for uid, info in list(free_users.items())[:30]:
+        uname = f"@{info['username']}" if info.get("username") else "username yo'q"
+        text += f"• {info.get('name', 'Nomsiz')} ({uname}) — `{uid}`\n"
+
+    if len(free_users) > 30:
+        text += f"\n... va yana {len(free_users) - 30} ta"
+
+    if len(text) > 4000:
+        text = text[:4000] + "\n\n... (ro'yxat juda uzun)"
 
     await update.message.reply_text(text, parse_mode="Markdown")
 
@@ -403,21 +433,34 @@ async def handle_admin_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
     caption = (message.caption or "").strip()
 
-    # Caption da faqat raqam yoziladi: masalan "1" yoki "5"
-    if not caption or not caption.split()[0].isdigit():
+    if not caption:
         await message.reply_text(
-            "📌 Faylni yuborayotganda caption ga faqat *raqam* yozing!\n\n"
-            "Misol: `1` yoki `5`\n\n"
-            "Ixtiyoriy sarlavha qo'shmoqchi bo'lsangiz:\n"
-            "`1 | Sarlavha | Tavsif`",
+            "📌 Faylni yuborayotganda izohga (caption) shunday yozing:\n\n"
+            "`1/Mavzu nomi`\n\n"
+            "Misol:\n"
+            "`1/Islom dini tarixi`\n"
+            "`5/Test savollari`",
             parse_mode="Markdown"
         )
         return
 
-    parts = caption.split("|")
+    if "/" in caption:
+        parts = caption.split("/", 1)
+    else:
+        parts = caption.split(" ", 1)
+
     num = parts[0].strip()
+
+    if not num.isdigit():
+        await message.reply_text(
+            "❌ Birinchi qism *raqam* bo'lishi kerak!\n\n"
+            "Misol: `1/Mavzu nomi`",
+            parse_mode="Markdown"
+        )
+        return
+
     title = parts[1].strip() if len(parts) > 1 else f"Material {num}"
-    description = parts[2].strip() if len(parts) > 2 else ""
+    description = ""
 
     if message.document:
         file_id, file_type = message.document.file_id, "document"
@@ -435,7 +478,7 @@ async def handle_admin_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     tag = " 🎁 (BEPUL)" if num == BEPUL_RAQAM else ""
     await message.reply_text(
-        f"✅ Saqlandi!\n*{num}* — {title}{tag}",
+        f"✅ Saqlandi!\n📚 *{num}* — {title}{tag}",
         parse_mode="Markdown"
     )
 
@@ -468,43 +511,4 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     materials = get_materials()
     users = get_users()
-    paid_count = sum(1 for u in users.values() if u.get("paid"))
-
-    await update.message.reply_text(
-        "📊 *Statistika*\n\n"
-        f"📦 Materiallar: *{len(materials)}*\n"
-        f"👥 Foydalanuvchilar: *{len(users)}*\n"
-        f"✅ To'laganlar: *{paid_count}*\n"
-        f"💰 Narx: *{NARX:,} so'm*",
-        parse_mode="Markdown"
-    )
-
-
-# ===================== MAIN =====================
-
-def main():
-    app = Application.builder().token(BOT_TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("list", list_materials))
-    app.add_handler(CommandHandler("addme", add_me_as_admin))
-    app.add_handler(CommandHandler("admin", admin_panel))
-    app.add_handler(CommandHandler("delete", delete_material))
-    app.add_handler(CommandHandler("stats", stats))
-    app.add_handler(CommandHandler("faollashtir", faollashtir))
-    app.add_handler(CommandHandler("narx", narx_ozgartir))
-    app.add_handler(CommandHandler("foydalanuvchilar", foydalanuvchilar))
-    app.add_handler(CallbackQueryHandler(button_handler))
-
-    app.add_handler(MessageHandler(
-        filters.Document.ALL | filters.PHOTO | filters.VIDEO,
-        handle_admin_file
-    ))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    logger.info("✅ Bot ishga tushdi!")
-    app.run_polling(drop_pending_updates=True)
-
-
-if __name__ == "__main__":
-    main()
+    paid_count = sum(1 for u in
